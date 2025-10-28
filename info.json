@@ -1,0 +1,13 @@
+{
+  "name": "Molad",
+  "content_in_root": false,
+  "domain": "molad",
+  "documentation": "https://github.com/Daniellamm/molad",
+  "homeassistant": "2023.6.0",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Daniellamm/molad/issues",
+  "codeowners": ["@Daniellamm"],
+  "requirements": ["hdate[astral]==1.1.2"],
+  "version": "0.1.0",
+  "zeroconf": "0.0.0"
+}
