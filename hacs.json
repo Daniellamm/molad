@@ -1,0 +1,8 @@
+{
+  "name": "Molad",
+  "domains": ["sensor"],
+  "homeassistant": "2023.6.0",
+  "hacs": "1.0.0",
+  "zip_release": true,
+  "filename": "molad.zip"
+}
