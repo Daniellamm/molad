@@ -215,15 +215,10 @@ class MoladHelper:
         hd = h.day
         z = hdate.Zmanim(date=date_only, location=self.location)
         
-        # Debug: log what's in zmanim to see the keys
-        _LOGGER.debug(f"Zmanim keys: {list(z.zmanim.keys())}")
-        
-        # Get sunset from zmanim dictionary
-        sunset_time = z.zmanim.get("sunset") or z.zmanim.get("shkia")
-        if sunset_time:
-            # Zman objects can be compared directly with datetime
-            if date > sunset_time:  # Direct comparison
-                hd += 1
+        # z.zmanim["sunset"] is a timezone-aware datetime, compare directly
+        sunset = z.zmanim.get("sunset")
+        if sunset and date > sunset:
+            hd += 1
         
         sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
         return (
