@@ -218,12 +218,11 @@ class MoladHelper:
         # Debug: log what's in zmanim to see the keys
         _LOGGER.debug(f"Zmanim keys: {list(z.zmanim.keys())}")
         
-        # Get sunset from zmanim dictionary - try common key names
+        # Get sunset from zmanim dictionary
         sunset_time = z.zmanim.get("sunset") or z.zmanim.get("shkia")
         if sunset_time:
-            # Combine date and time to create full datetime for comparison
-            sunset_datetime = datetime.combine(date_only, sunset_time.time() if hasattr(sunset_time, 'time') else sunset_time)
-            if date > sunset_datetime:
+            # Zman objects can be compared directly with datetime
+            if date > sunset_time:  # Direct comparison
                 hd += 1
         
         sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
