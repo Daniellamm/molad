@@ -209,19 +209,26 @@ class MoladHelper:
         h = HebrewDate.from_gdate(gdate)  # FIXED
         return h.day  # FIXED
 
-    def is_shabbos_mevorchim(self, date: datetime) -> bool:
+        def is_shabbos_mevorchim(self, date: datetime) -> bool:
         date_only = date.date()
         h = HebrewDate.from_gdate(date_only)
         hd = h.day
         z = hdate.Zmanim(date=date_only, location=self.location)
         
-        # Check if current time is after sunset
-        if z.sunset and date > z.sunset:  # FIXED
-            hd += 1
+        # Debug: log what's in zmanim to see the keys
+        _LOGGER.debug(f"Zmanim keys: {list(z.zmanim.keys())}")
+        
+        # Get sunset from zmanim dictionary - try common key names
+        sunset_time = z.zmanim.get("sunset") or z.zmanim.get("shkia")
+        if sunset_time:
+            # Combine date and time to create full datetime for comparison
+            sunset_datetime = datetime.combine(date_only, sunset_time.time() if hasattr(sunset_time, 'time') else sunset_time)
+            if date > sunset_datetime:
+                hd += 1
         
         sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
         return (
-            self.is_actual_shabbat(z, date)  # Pass date to method
+            self.is_actual_shabbat(z, date)
             and hd == sm
             and h.month != 6  # Elul
         )
