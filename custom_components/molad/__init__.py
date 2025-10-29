@@ -16,6 +16,8 @@ from .const import (
     SENSOR_MOLAD,
 )
 
+from .sensor import MoladDataUpdateCoordinator
+
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = vol.Schema(
