@@ -8,7 +8,8 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .const import DOMAIN, DEFAULT_NAME, DEFAULT_DIASPORA
 
-class MoladConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Molad."""
 
     VERSION = 1
