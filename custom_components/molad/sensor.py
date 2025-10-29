@@ -193,12 +193,22 @@ class MoladHelper:
         if next_month["month"] == 1:
             return RoshChodesh(next_month_name, "", [], [])
         
-        gdate_first = self.get_gdate(this_month, 30)
+        # Try day 30 first, fall back to day 29 if month doesn't have 30 days
+        try:
+            gdate_first = self.get_gdate(this_month, 30)
+        except ValueError:
+            gdate_first = self.get_gdate(this_month, 29)
+        
         gdate_second = self.get_gdate(next_month, 1)
         first = self.get_day_of_week(gdate_first)
         second = self.get_day_of_week(gdate_second)
         if first == second:
-            return RoshChodesh(next_month_name, first, [first], [gdate_first])
+            return RoshChodesh(
+                next_month_name,
+                first,
+                [first],
+                [gdate_first]
+            )
         return RoshChodesh(
             next_month_name, f"{first} & {second}", [first, second], [gdate_first, gdate_second]
         )
@@ -206,11 +216,10 @@ class MoladHelper:
     def get_shabbos_mevorchim_english_date(self, date: datetime.date) -> datetime.date:
         this_month = self.get_numeric_month_year(date)
         
-        # Try day 30 first, fall back to day 29 if month doesn't have 30 days
+        # Try day 30, fall back to 29 if invalid
         try:
             gdate = self.get_gdate(this_month, 30)
         except ValueError:
-            # Month only has 29 days
             gdate = self.get_gdate(this_month, 29)
         
         idx = (gdate.weekday() + 1) % 7
@@ -253,7 +262,6 @@ class MoladHelper:
         # Make current_time timezone-aware if it isn't already
         if current_time.tzinfo is None:
             from zoneinfo import ZoneInfo
-            # Get the timezone from the location's timezone string
             tz = ZoneInfo(str(self.location.timezone))
             current_time = current_time.replace(tzinfo=tz)
         
