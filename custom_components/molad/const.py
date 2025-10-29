@@ -1,6 +1,8 @@
 """Constants for the molad integration."""
 
 DOMAIN = "molad"
+DEFAULT_NAME = "Molad"
+DEFAULT_DIASPORA = True
 
 # Entity IDs
 SENSOR_MOLAD = "sensor.molad"
