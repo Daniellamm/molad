@@ -210,28 +210,28 @@ class MoladHelper:
         return h.day  # FIXED
 
         def is_shabbos_mevorchim(self, date: datetime) -> bool:
-        date_only = date.date()
-        h = HebrewDate.from_gdate(date_only)
-        hd = h.day
-        z = hdate.Zmanim(date=date_only, location=self.location)
-        
-        # Debug: log what's in zmanim to see the keys
-        _LOGGER.debug(f"Zmanim keys: {list(z.zmanim.keys())}")
-        
-        # Get sunset from zmanim dictionary - try common key names
-        sunset_time = z.zmanim.get("sunset") or z.zmanim.get("shkia")
-        if sunset_time:
-            # Combine date and time to create full datetime for comparison
-            sunset_datetime = datetime.combine(date_only, sunset_time.time() if hasattr(sunset_time, 'time') else sunset_time)
-            if date > sunset_datetime:
-                hd += 1
-        
-        sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
-        return (
-            self.is_actual_shabbat(z, date)
-            and hd == sm
-            and h.month != 6  # Elul
-        )
+            date_only = date.date()
+            h = HebrewDate.from_gdate(date_only)
+            hd = h.day
+            z = hdate.Zmanim(date=date_only, location=self.location)
+            
+            # Debug: log what's in zmanim to see the keys
+            _LOGGER.debug(f"Zmanim keys: {list(z.zmanim.keys())}")
+            
+            # Get sunset from zmanim dictionary - try common key names
+            sunset_time = z.zmanim.get("sunset") or z.zmanim.get("shkia")
+            if sunset_time:
+                # Combine date and time to create full datetime for comparison
+                sunset_datetime = datetime.combine(date_only, sunset_time.time() if hasattr(sunset_time, 'time') else sunset_time)
+                if date > sunset_datetime:
+                    hd += 1
+            
+            sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
+            return (
+                self.is_actual_shabbat(z, date)
+                and hd == sm
+                and h.month != 6  # Elul
+            )
 
     def is_upcoming_shabbos_mevorchim(self, date: datetime) -> bool:
         weekday_sunday_as_zero = (date.date().weekday() + 1) % 7
