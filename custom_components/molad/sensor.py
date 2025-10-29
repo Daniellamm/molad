@@ -4,11 +4,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 import math
-from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -17,6 +16,8 @@ from homeassistant.helpers.update_coordinator import (
 
 # OFFICIAL HA STYLE — hdate 1.1.2
 import hdate
+from hdate.hebrew_date import HebrewDate
+from hdate.translator import set_language
 
 from .const import (
     ATTR_DAY,
@@ -40,7 +41,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-# === CLASSES FROM YOUR ORIGINAL HELPER ===
+# === CLASSES ===
 class Molad:
     def __init__(self, day: str, hours: int, minutes: int, am_or_pm: str, chalakim: int, friendly: str):
         self.day = day
@@ -69,9 +70,10 @@ class MoladDetails:
         self.rosh_chodesh = rosh_chodesh
 
 
-# === MODERN MOLAD HELPER (OFFICIAL HA STYLE) ===
+# === MOLAD HELPER ===
 class MoladHelper:
     def __init__(self, latitude: float, longitude: float, time_zone: str, diaspora: bool = True):
+        set_language("en")  # SET ENGLISH
         self.location = hdate.Location(
             latitude=latitude,
             longitude=longitude,
@@ -156,8 +158,8 @@ class MoladHelper:
         return self.sumup(multipliers)
 
     def get_numeric_month_year(self, date: datetime.date) -> dict:
-        h = hdate.HDate.from_py(date)
-        return {"month": h.hebrew_month, "year": h.hebrew_year}
+        h = HebrewDate.from_gdate(date)  # FIXED
+        return {"month": h.month, "year": h.year}  # FIXED
 
     def get_next_numeric_month_year(self, date: datetime.date) -> dict:
         this_month = self.get_numeric_month_year(date)
@@ -171,8 +173,8 @@ class MoladHelper:
         return {"month": numeric_month, "year": year}
 
     def get_gdate(self, numeric_month: dict, day: int) -> datetime.date:
-        h = hdate.HDate(numeric_month["year"], numeric_month["month"], day)
-        return h.to_py()
+        h = HebrewDate(numeric_month["year"], numeric_month["month"], day)  # FIXED
+        return h.to_gdate()  # FIXED
 
     def get_day_of_week(self, gdate: datetime.date) -> str:
         weekday = gdate.strftime("%A")
@@ -181,8 +183,8 @@ class MoladHelper:
     def get_rosh_chodesh_days(self, date: datetime.date) -> RoshChodesh:
         this_month = self.get_numeric_month_year(date)
         next_month = self.get_next_numeric_month_year(date)
-        next_hdate = hdate.HDate(next_month["year"], next_month["month"], 1)
-        next_month_name = next_hdate.hebrew_month_name
+        next_hdate = HebrewDate(next_month["year"], next_month["month"], 1)  # FIXED
+        next_month_name = next_hdate.month_name  # FIXED
         if next_month["month"] == 1:
             return RoshChodesh(next_month_name, "", [], [])
         gdate_first = self.get_gdate(this_month, 30)
@@ -204,13 +206,13 @@ class MoladHelper:
 
     def get_shabbos_mevorchim_hebrew_day_of_month(self, date: datetime.date) -> int:
         gdate = self.get_shabbos_mevorchim_english_date(date)
-        h = hdate.HDate.from_py(gdate)
-        return h.hebrew_day
+        h = HebrewDate.from_gdate(gdate)  # FIXED
+        return h.day  # FIXED
 
     def is_shabbos_mevorchim(self, date: datetime) -> bool:
         date_only = date.date()
-        h = hdate.HDate.from_py(date_only)
-        hd = h.hebrew_day
+        h = HebrewDate.from_gdate(date_only)  # FIXED
+        hd = h.day  # FIXED
         z = hdate.Zmanim(date=date_only, location=self.location, hebrew=False)
         if z.time > z.zmanim["sunset"]:
             hd += 1
@@ -218,7 +220,7 @@ class MoladHelper:
         return (
             self.is_actual_shabbat(z)
             and hd == sm
-            and h.hebrew_month != 6  # Elul
+            and h.month != 6  # FIXED - Elul
         )
 
     def is_upcoming_shabbos_mevorchim(self, date: datetime) -> bool:
@@ -228,8 +230,8 @@ class MoladHelper:
         return self.is_shabbos_mevorchim(upcoming_saturday_at_midnight)
 
     def is_actual_shabbat(self, z: hdate.Zmanim) -> bool:
-        today = hdate.HDate.from_py(z.date)
-        tomorrow = hdate.HDate.from_py(z.date + timedelta(days=1))
+        today = hdate.HDateInfo(z.date)
+        tomorrow = hdate.HDateInfo(z.date + timedelta(days=1))
         if today.is_shabbat and z.havdalah and z.time < z.havdalah:
             return True
         if tomorrow.is_shabbat and z.candle_lighting and z.time >= z.candle_lighting:
@@ -288,7 +290,6 @@ class MoladDataUpdateCoordinator(DataUpdateCoordinator):
 # === SETUP ===
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    await coordinator.async_config_entry_first_refresh()
 
     entities = [
         MoladSensor(coordinator),
