@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 import math
-import pytz
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -159,8 +158,8 @@ class MoladHelper:
         return self.sumup(multipliers)
 
     def get_numeric_month_year(self, date: datetime.date) -> dict:
-        h = HebrewDate.from_gdate(date)  # FIXED
-        return {"month": h.month, "year": h.year}  # FIXED
+        h = HebrewDate.from_gdate(date)
+        return {"month": h.month, "year": h.year}
 
     def get_next_numeric_month_year(self, date: datetime.date) -> dict:
         this_month = self.get_numeric_month_year(date)
@@ -174,8 +173,12 @@ class MoladHelper:
         return {"month": numeric_month, "year": year}
 
     def get_gdate(self, numeric_month: dict, day: int) -> datetime.date:
-        h = HebrewDate(numeric_month["year"], numeric_month["month"], day)  # FIXED
-        return h.to_gdate()  # FIXED
+        try:
+            h = HebrewDate(numeric_month["year"], numeric_month["month"], day)
+            return h.to_gdate()
+        except ValueError as e:
+            _LOGGER.debug("Invalid Hebrew date %s/%s/%s: %s", numeric_month["year"], numeric_month["month"], day, e)
+            raise
 
     def get_day_of_week(self, gdate: datetime.date) -> str:
         weekday = gdate.strftime("%A")
@@ -185,51 +188,63 @@ class MoladHelper:
         this_month = self.get_numeric_month_year(date)
         next_month = self.get_next_numeric_month_year(date)
         
-        # Create HDateInfo directly to get the month name
-        next_date = self.get_gdate(next_month, 1)
-        next_hdate_info = hdate.HDateInfo(next_date)
-        next_month_name = next_hdate_info.hdate.month.name  # Get the Enum name
+        # Always get day 1 of next month
+        gdate_second = self.get_gdate(next_month, 1)
+        second_day = self.get_day_of_week(gdate_second)
         
-        if next_month["month"] == 1:
+        # Get month name
+        next_hdate_info = hdate.HDateInfo(gdate_second)
+        next_month_name = next_hdate_info.hdate.month.name
+        
+        if next_month["month"] == 1:  # Tishrei
             return RoshChodesh(next_month_name, "", [], [])
         
-        # Try day 30 first, fall back to day 29 if month doesn't have 30 days
+        # Try to get day 30 of current month
         try:
             gdate_first = self.get_gdate(this_month, 30)
+            first_day = self.get_day_of_week(gdate_first)
+            
+            if first_day != second_day:
+                return RoshChodesh(
+                    next_month_name,
+                    f"{first_day} & {second_day}",
+                    [first_day, second_day],
+                    [gdate_first, gdate_second]
+                )
+            else:
+                return RoshChodesh(
+                    next_month_name,
+                    second_day,
+                    [second_day],
+                    [gdate_second]
+                )
         except ValueError:
-            gdate_first = self.get_gdate(this_month, 29)
-        
-        gdate_second = self.get_gdate(next_month, 1)
-        first = self.get_day_of_week(gdate_first)
-        second = self.get_day_of_week(gdate_second)
-        if first == second:
+            # No day 30 → one-day Rosh Chodesh
             return RoshChodesh(
                 next_month_name,
-                first,
-                [first],
-                [gdate_first]
+                second_day,
+                [second_day],
+                [gdate_second]
             )
-        return RoshChodesh(
-            next_month_name, f"{first} & {second}", [first, second], [gdate_first, gdate_second]
-        )
 
     def get_shabbos_mevorchim_english_date(self, date: datetime.date) -> datetime.date:
         this_month = self.get_numeric_month_year(date)
         
-        # Try day 30, fall back to 29 if invalid
         try:
             gdate = self.get_gdate(this_month, 30)
         except ValueError:
             gdate = self.get_gdate(this_month, 29)
         
-        idx = (gdate.weekday() + 1) % 7
-        sat_date = gdate - timedelta(days=7 + idx - 6)
-        return sat_date
+        # Find previous Saturday (weekday: 5 = Saturday)
+        days_to_subtract = (gdate.weekday() - 5) % 7
+        if days_to_subtract == 0:
+            days_to_subtract = 7
+        return gdate - timedelta(days=days_to_subtract)
 
     def get_shabbos_mevorchim_hebrew_day_of_month(self, date: datetime.date) -> int:
         gdate = self.get_shabbos_mevorchim_english_date(date)
-        h = HebrewDate.from_gdate(gdate)  # FIXED
-        return h.day  # FIXED
+        h = HebrewDate.from_gdate(gdate)
+        return h.day
 
     def is_shabbos_mevorchim(self, date: datetime) -> bool:
         date_only = date.date()
@@ -237,7 +252,7 @@ class MoladHelper:
         hd = h.day
         z = hdate.Zmanim(date=date_only, location=self.location)
         
-        # z.zmanim["sunset"] is a timezone-aware datetime, compare directly
+        # Check if after sunset
         sunset = z.zmanim.get("sunset")
         if sunset and date > sunset:
             hd += 1
@@ -259,16 +274,14 @@ class MoladHelper:
         today = hdate.HDateInfo(z.date)
         tomorrow = hdate.HDateInfo(z.date + timedelta(days=1))
         
-        # Make current_time timezone-aware if it isn't already
+        # Make current_time timezone-aware
         if current_time.tzinfo is None:
             from zoneinfo import ZoneInfo
             tz = ZoneInfo(str(self.location.timezone))
             current_time = current_time.replace(tzinfo=tz)
         
-        # Check if it's Shabbat now (before havdalah)
         if today.is_shabbat and z.havdalah and current_time < z.havdalah:
             return True
-        # Check if Shabbat starts soon (after candle lighting)
         if tomorrow.is_shabbat and z.candle_lighting and current_time >= z.candle_lighting:
             return True
         return False
@@ -325,6 +338,7 @@ class MoladDataUpdateCoordinator(DataUpdateCoordinator):
 # === SETUP ===
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    await coordinator.async_config_entry_first_refresh()
 
     entities = [
         MoladSensor(coordinator),
