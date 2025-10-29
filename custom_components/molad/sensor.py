@@ -184,10 +184,15 @@ class MoladHelper:
     def get_rosh_chodesh_days(self, date: datetime.date) -> RoshChodesh:
         this_month = self.get_numeric_month_year(date)
         next_month = self.get_next_numeric_month_year(date)
-        next_hdate = HebrewDate(next_month["year"], next_month["month"], 1)  # FIXED
-        next_month_name = next_hdate.month_name  # FIXED
+        
+        # Create HDateInfo directly to get the month name
+        next_date = self.get_gdate(next_month, 1)
+        next_hdate_info = hdate.HDateInfo(next_date)
+        next_month_name = next_hdate_info.hdate.month.name  # Get the Enum name
+        
         if next_month["month"] == 1:
             return RoshChodesh(next_month_name, "", [], [])
+        
         gdate_first = self.get_gdate(this_month, 30)
         gdate_second = self.get_gdate(next_month, 1)
         first = self.get_day_of_week(gdate_first)
