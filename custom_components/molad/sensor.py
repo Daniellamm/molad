@@ -247,7 +247,10 @@ class MoladHelper:
         
         # Make current_time timezone-aware if it isn't already
         if current_time.tzinfo is None:
-            current_time = self.location.timezone.localize(current_time)
+            from zoneinfo import ZoneInfo
+            # Get the timezone from the location's timezone string
+            tz = ZoneInfo(str(self.location.timezone))
+            current_time = current_time.replace(tzinfo=tz)
         
         # Check if it's Shabbat now (before havdalah)
         if today.is_shabbat and z.havdalah and current_time < z.havdalah:
