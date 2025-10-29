@@ -199,7 +199,14 @@ class MoladHelper:
 
     def get_shabbos_mevorchim_english_date(self, date: datetime.date) -> datetime.date:
         this_month = self.get_numeric_month_year(date)
-        gdate = self.get_gdate(this_month, 30)
+        
+        # Try day 30 first, fall back to day 29 if month doesn't have 30 days
+        try:
+            gdate = self.get_gdate(this_month, 30)
+        except ValueError:
+            # Month only has 29 days
+            gdate = self.get_gdate(this_month, 29)
+        
         idx = (gdate.weekday() + 1) % 7
         sat_date = gdate - timedelta(days=7 + idx - 6)
         return sat_date
