@@ -187,8 +187,14 @@ class MoladHelper:
         return Molad(day_name, hours12, minutes, am_pm, chalakim, friendly)
 
     def get_actual_molad(self, gdate: datetime.date) -> Molad:
-        h = HebrewDate.from_gdate(gdate)
-        raw = self._molad_raw(h.year, h.month)
+        """Get molad for the NEXT month (upcoming Rosh Chodesh).
+        
+        Traditional practice announces the molad for the upcoming month,
+        not the current month.
+        """
+        cur = self._hebrew_month_year(gdate)
+        nxt = self._next_hebrew_month(cur)
+        raw = self._molad_raw(nxt["year"], nxt["month"])
         return self._raw_to_molad(raw)
 
     # === HELPERS ===
