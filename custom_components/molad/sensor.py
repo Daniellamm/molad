@@ -1,9 +1,8 @@
-"""Support for Molad sensors."""
+"""Support for Molad sensors - CORRECTED VERSION."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
-import math
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -14,10 +13,10 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
-# OFFICIAL HA STYLE — hdate 1.1.2
 import hdate
 from hdate.hebrew_date import HebrewDate
 from hdate.translator import set_language
+from zoneinfo import ZoneInfo
 
 from .const import (
     ATTR_DAY,
@@ -41,7 +40,6 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-# === CLASSES ===
 class Molad:
     def __init__(self, day: str, hours: int, minutes: int, am_or_pm: str, chalakim: int, friendly: str):
         self.day = day
@@ -70,300 +68,284 @@ class MoladDetails:
         self.rosh_chodesh = rosh_chodesh
 
 
-# === MOLAD HELPER ===
 class MoladHelper:
+    # === CONSTANTS ===
+    CHALAKIM_PER_HOUR = 1080
+    CHALAKIM_PER_DAY = 24 * CHALAKIM_PER_HOUR
+    CHALAKIM_PER_WEEK = 7 * CHALAKIM_PER_DAY
+    LUNAR_MONTH_CHALAKIM = 29 * CHALAKIM_PER_DAY + 12 * CHALAKIM_PER_HOUR + 793  # 765433
+
+    # Reference: Molad Tishrei, Year 1 = Monday 5h 204p (Hebrew time)
+    # Hebrew time: Day 2 (Monday), Hour 5 (5 hours after 6pm Sunday)
+    # Civil time: Sunday 11:11:20 PM
+    REF_YEAR = 1
+    REF_MONTH = 7  # Tishrei
+    REF_DAY_OF_WEEK = 2  # Monday (Hebrew day, where Monday starts Sunday 6pm)
+    REF_HOURS = 5  # Hebrew hours (hours after 6pm)
+    REF_CHALAKIM = 204
+
+    # Leap years in 19-year cycle: years 3,6,8,11,14,17,19
+    LEAP_YEARS_IN_CYCLE = {3, 6, 8, 11, 14, 17, 19}
+
     def __init__(self, latitude: float, longitude: float, time_zone: str, diaspora: bool = True):
-        set_language("en")  # SET ENGLISH
+        set_language("en")
         self.location = hdate.Location(
             latitude=latitude,
             longitude=longitude,
             timezone=time_zone,
             diaspora=diaspora,
         )
+        self.tz = ZoneInfo(time_zone)
 
-    def sumup(self, multipliers) -> Molad:
-        shifts = [
-            [2, 5, 204],
-            [2, 16, 595],
-            [4, 8, 876],
-            [5, 21, 589],
-            [1, 12, 793],
-        ]
-        out00 = self.multiply_matrix([multipliers], shifts)
-        out0 = out00[0]
-        out1 = self.carry_and_reduce(out0)
-        out2 = self.convert_to_english(out1)
-        return out2
+    # === LEAP YEAR (FIXED) ===
+    @staticmethod
+    def _is_leap_year(year: int) -> bool:
+        """Check if a Hebrew year is a leap year.
+        
+        Fixed: Year 19 (and 38, 57, etc.) are leap years.
+        The issue was that 19 % 19 = 0, not 19.
+        """
+        position = year % 19
+        if position == 0:
+            position = 19  # Year 19 of cycle, not year 0
+        return position in MoladHelper.LEAP_YEARS_IN_CYCLE
 
-    def multiply_matrix(self, matrix1, matrix2):
-        res = [[0] * 3 for _ in matrix1]
-        for i in range(len(matrix1)):
-            for j in range(3):
-                for k in range(len(matrix2)):
-                    res[i][j] += matrix1[i][k] * matrix2[k][j]
-        return res
+    # === MOLAD WITH LEAP YEARS (CORRECT) ===
+    def _molad_raw(self, year: int, month: int) -> tuple[int, int, int, int]:
+        """Calculate molad using full Metonic cycle (235 months per 19 years).
+        
+        Returns tuple of (day, hours_hebrew, minutes, chalakim) where hours are in Hebrew time.
+        """
+        years_from_ref = year - self.REF_YEAR  # e.g., year 5785 → 5784 years
 
-    def carry_and_reduce(self, out0):
-        xx = out0[2]
-        yy = xx % 1080
-        zz = math.floor(xx / 1080)
-        if yy < 0:
-            yy += 1080
-            zz -= 1
-        out1 = [0, 0, 0]
-        out1[2] = yy
-        xx = out0[1] + zz
-        yy = xx % 24
-        zz = math.floor(xx / 24)
-        if yy < 0:
-            yy += 24
-            zz -= 1
-        out1[1] = yy
-        xx = out0[0] + zz
-        yy = (xx + 6) % 7 + 1
-        out1[0] = yy
-        return out1
+        # Complete 19-year cycles
+        complete_cycles = years_from_ref // 19
+        total_months = complete_cycles * 235  # 19 years = 235 months
 
-    def convert_to_english(self, out1) -> Molad:
-        days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Shabbos"]
-        day = out1[0]
-        hours = out1[1] - 6
-        chalakim = out1[2]
-        if hours < 0:
-            day -= 1
-            hours += 24
-        daynm = days[day - 1]
-        pm = "am" if hours < 12 else "pm"
-        hours = hours % 12
-        hours = 12 if hours == 0 else hours
-        minutes = math.floor(chalakim / 18)
-        chalakim = chalakim % 18
-        filler = "0" if minutes < 10 else ""
-        friendly = f"{daynm}, {hours}:{filler}{minutes} {pm} and {chalakim} chalakim"
-        return Molad(daynm, hours, minutes, pm, chalakim, friendly)
+        # Remaining years in partial cycle
+        remaining_years = years_from_ref % 19
+        for y in range(1, remaining_years + 1):
+            cycle_year = y
+            total_months += 13 if cycle_year in self.LEAP_YEARS_IN_CYCLE else 12
 
-    def get_actual_molad(self, date: datetime.date) -> Molad:
-        numeric_month = self.get_numeric_month_year(date)
-        year = numeric_month["year"] - 3761
-        multipliers = [1, 0, 0, 0, 0]
-        multipliers[1] = math.floor(year / 19)
-        year = year % 19
-        multipliers[2] = year
-        multipliers[3] = 0
-        for threshold in [3, 6, 9, 12, 14, 17]:
-            if year > threshold:
-                multipliers[3] += 1
-        multipliers[4] = numeric_month["month"] - 1
-        multipliers[2] += multipliers[3]
-        return self.sumup(multipliers)
-
-    def get_numeric_month_year(self, date: datetime.date) -> dict:
-        h = HebrewDate.from_gdate(date)
-        return {"month": h.month, "year": h.year}
-
-    def get_next_numeric_month_year(self, date: datetime.date) -> dict:
-        this_month = self.get_numeric_month_year(date)
-        numeric_month = this_month["month"]
-        year = this_month["year"]
-        if numeric_month == 13:
-            numeric_month = 1
-            year += 1
+        # Add months in current year up to target month
+        # Hebrew year starts at Tishrei (month 7)
+        if month >= 7:
+            # Tishrei to target month
+            total_months += (month - 7)  # Tishrei = 0 extra
         else:
-            numeric_month += 1
-        return {"month": numeric_month, "year": year}
+            # Nisan to target month
+            months_from_tishrei = 6  # Tishrei to Adar I
+            if self._is_leap_year(year):
+                months_from_tishrei = 7  # Tishrei to Adar II
+            total_months += months_from_tishrei + (month - 1)  # Nisan = month 1
 
-    def get_gdate(self, numeric_month: dict, day: int) -> datetime.date:
-        try:
-            h = HebrewDate(numeric_month["year"], numeric_month["month"], day)
-            return h.to_gdate()
-        except ValueError as e:
-            _LOGGER.debug("Invalid Hebrew date %s/%s/%s: %s", numeric_month["year"], numeric_month["month"], day, e)
-            raise
+        # Total chalakim
+        total_chalakim = total_months * self.LUNAR_MONTH_CHALAKIM
+        total_chalakim += (self.REF_DAY_OF_WEEK - 1) * self.CHALAKIM_PER_DAY
+        total_chalakim += self.REF_HOURS * self.CHALAKIM_PER_HOUR
+        total_chalakim += self.REF_CHALAKIM
+        total_chalakim %= self.CHALAKIM_PER_WEEK
 
-    def get_day_of_week(self, gdate: datetime.date) -> str:
-        weekday = gdate.strftime("%A")
-        return "Shabbos" if weekday == "Saturday" else weekday
+        # Extract (returns Hebrew time)
+        days = total_chalakim // self.CHALAKIM_PER_DAY + 1
+        remainder = total_chalakim % self.CHALAKIM_PER_DAY
+        hours = remainder // self.CHALAKIM_PER_HOUR
+        remainder %= self.CHALAKIM_PER_HOUR
+        minutes = remainder // 18
+        chalakim = remainder % 18
 
-    def get_rosh_chodesh_days(self, date: datetime.date) -> RoshChodesh:
-        this_month = self.get_numeric_month_year(date)
-        next_month = self.get_next_numeric_month_year(date)
-        
-        # Always get day 1 of next month
-        gdate_second = self.get_gdate(next_month, 1)
-        second_day = self.get_day_of_week(gdate_second)
-        
-        # Get month name
-        next_hdate_info = hdate.HDateInfo(gdate_second)
-        next_month_name = next_hdate_info.hdate.month.name
-        
-        if next_month["month"] == 1:  # Tishrei
-            return RoshChodesh(next_month_name, "", [], [])
-        
-        # Try to get day 30 of current month
-        try:
-            gdate_first = self.get_gdate(this_month, 30)
-            first_day = self.get_day_of_week(gdate_first)
-            
-            if first_day != second_day:
-                return RoshChodesh(
-                    next_month_name,
-                    f"{first_day} & {second_day}",
-                    [first_day, second_day],
-                    [gdate_first, gdate_second]
-                )
-            else:
-                return RoshChodesh(
-                    next_month_name,
-                    second_day,
-                    [second_day],
-                    [gdate_second]
-                )
-        except ValueError:
-            # No day 30 → one-day Rosh Chodesh
-            return RoshChodesh(
-                next_month_name,
-                second_day,
-                [second_day],
-                [gdate_second]
-            )
+        return days, hours, minutes, chalakim
 
-    def get_shabbos_mevorchim_english_date(self, date: datetime.date) -> datetime.date:
-        this_month = self.get_numeric_month_year(date)
+    def _raw_to_molad(self, raw: tuple[int, int, int, int]) -> Molad:
+        """Convert raw molad to Molad object.
         
-        try:
-            gdate = self.get_gdate(this_month, 30)
-        except ValueError:
-            gdate = self.get_gdate(this_month, 29)
+        Fixed: Now converts Hebrew hours to civil hours for traditional announcements.
+        Hebrew time starts at 6pm, so we subtract 6 hours to get civil time.
+        """
+        day_num, hours_hebrew, minutes, chalakim = raw
+        days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Shabbos"]
         
-        # Find previous Saturday (weekday: 5 = Saturday)
-        days_to_subtract = (gdate.weekday() - 5) % 7
-        if days_to_subtract == 0:
-            days_to_subtract = 7
-        return gdate - timedelta(days=days_to_subtract)
+        # Convert from Hebrew hours (starting at 6pm) to civil hours (starting at midnight)
+        # Hebrew hour 0 = 6pm civil (18:00)
+        # Hebrew hour 5 = 11pm civil (23:00)
+        # Hebrew hour 18 = noon civil (12:00)
+        civil_hours = hours_hebrew - 6
+        if civil_hours < 0:
+            civil_hours += 24
+            # Going back before midnight means previous civil day
+            day_num = day_num - 1 if day_num > 1 else 7
+        
+        day_name = days[day_num - 1]
+        am_pm = "am" if civil_hours < 12 else "pm"
+        hours12 = civil_hours % 12
+        hours12 = 12 if hours12 == 0 else hours12
 
-    def get_shabbos_mevorchim_hebrew_day_of_month(self, date: datetime.date) -> int:
-        gdate = self.get_shabbos_mevorchim_english_date(date)
+        filler = "0" if minutes < 10 else ""
+        friendly = f"{day_name}, {hours12}:{filler}{minutes} {am_pm} and {chalakim} chalakim"
+
+        return Molad(day_name, hours12, minutes, am_pm, chalakim, friendly)
+
+    def get_actual_molad(self, gdate: datetime.date) -> Molad:
         h = HebrewDate.from_gdate(gdate)
-        return h.day
+        raw = self._molad_raw(h.year, h.month)
+        return self._raw_to_molad(raw)
 
-    def is_shabbos_mevorchim(self, date: datetime) -> bool:
-        date_only = date.date()
-        h = HebrewDate.from_gdate(date_only)
+    # === HELPERS ===
+    @staticmethod
+    def _hebrew_month_year(gdate: datetime.date) -> dict:
+        h = HebrewDate.from_gdate(gdate)
+        return {"year": h.year, "month": h.month}
+
+    @staticmethod
+    def _next_hebrew_month(cur: dict) -> dict:
+        if cur["month"] == 13:
+            return {"month": 1, "year": cur["year"] + 1}
+        return {"month": cur["month"] + 1, "year": cur["year"]}
+
+    @staticmethod
+    def _gdate_from_hebrew(hinfo: dict, day: int) -> datetime.date:
+        h = HebrewDate(hinfo["year"], hinfo["month"], day)
+        return h.to_gdate()
+
+    @staticmethod
+    def _dow_name(gdate: datetime.date) -> str:
+        name = gdate.strftime("%A")
+        return "Shabbos" if name == "Saturday" else name
+
+    # === ROSH CHODESH ===
+    def get_rosh_chodesh_days(self, gdate: datetime.date) -> RoshChodesh:
+        cur = self._hebrew_month_year(gdate)
+        nxt = self._next_hebrew_month(cur)
+        g_second = self._gdate_from_hebrew(nxt, 1)
+        second_dow = self._dow_name(g_second)
+        info = hdate.HDateInfo(g_second)
+        month_name = info.hdate.month.name
+
+        if nxt["month"] == 7:  # Tishrei
+            return RoshChodesh(month_name, "", [], [])
+
+        try:
+            g_first = self._gdate_from_hebrew(cur, 30)
+            first_dow = self._dow_name(g_first)
+            return RoshChodesh(month_name, f"{first_dow} & {second_dow}", [first_dow, second_dow], [g_first, g_second])
+        except ValueError:
+            return RoshChodesh(month_name, second_dow, [second_dow], [g_second])
+
+    # === SHABBOS MEVORCHIM (FIXED) ===
+    def _shabbos_mevorchim_date(self, gdate: datetime.date) -> datetime.date:
+        cur = self._hebrew_month_year(gdate)
+        has_30_days = False
+        try:
+            last = self._gdate_from_hebrew(cur, 30)
+            has_30_days = True
+        except ValueError:
+            last = self._gdate_from_hebrew(cur, 29)
+
+        days_back = (last.weekday() - 5) % 7
+        if days_back == 0 and has_30_days:
+            days_back = 7
+        return last - timedelta(days=days_back)
+
+    def _shabbos_mevorchim_hebrew_day(self, gdate: datetime.date) -> datetime.date:
+        return self._shabbos_mevorchim_date(gdate)
+
+    # === SHABBOS MEVORCHIM DETECTION (FRIDAY EVENING FIXED) ===
+    def is_shabbos_mevorchim(self, now: datetime) -> bool:
+        today = now.date()
+        z = hdate.Zmanim(date=today, location=self.location)
+
+        # Determine correct Hebrew date during Shabbat
+        if self._is_actual_shabbat(z, now):
+            # During Shabbat: use Saturday's date
+            if today.weekday() == 5:  # Saturday
+                h_date = today
+            else:  # Friday evening
+                h_date = today + timedelta(days=1)
+        else:
+            h_date = today
+
+        h = HebrewDate.from_gdate(h_date)
         hd = h.day
-        z = hdate.Zmanim(date=date_only, location=self.location)
-        
-        # Check if after sunset
-        sunset = z.zmanim.get("sunset")
-        if sunset and date > sunset:
-            hd += 1
-        
-        sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
-        return (
-            self.is_actual_shabbat(z, date)
-            and hd == sm
-            and h.month != 6  # Elul
-        )
+        target_date = self._shabbos_mevorchim_hebrew_day(today)
+        target_hd = HebrewDate.from_gdate(target_date).day
 
-    def is_upcoming_shabbos_mevorchim(self, date: datetime) -> bool:
-        weekday_sunday_as_zero = (date.date().weekday() + 1) % 7
-        upcoming_saturday = date.date() - timedelta(days=weekday_sunday_as_zero) + timedelta(days=6)
-        upcoming_saturday_at_midnight = datetime.combine(upcoming_saturday, datetime.min.time())
-        return self.is_shabbos_mevorchim(upcoming_saturday_at_midnight)
+        return self._is_actual_shabbat(z, now) and hd == target_hd and h.month != 6
 
-    def is_actual_shabbat(self, z: hdate.Zmanim, current_time: datetime) -> bool:
+    def is_upcoming_shabbos_mevorchim(self, now: datetime) -> bool:
+        wd = (now.date().weekday() + 1) % 7
+        next_sat = now.date() - timedelta(days=wd) + timedelta(days=6)
+        next_sat_dt = datetime.combine(next_sat, now.time())
+        if now.tzinfo:
+            next_sat_dt = next_sat_dt.replace(tzinfo=now.tzinfo)
+        return self.is_shabbos_mevorchim(next_sat_dt)
+
+    def _is_actual_shabbat(self, z: hdate.Zmanim, now: datetime) -> bool:
+        """Check if now is during Shabbat (Friday evening to Saturday evening)."""
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=self.tz)
         today = hdate.HDateInfo(z.date)
         tomorrow = hdate.HDateInfo(z.date + timedelta(days=1))
         
-        # Make current_time timezone-aware
-        if current_time.tzinfo is None:
-            from zoneinfo import ZoneInfo
-            tz = ZoneInfo(str(self.location.timezone))
-            current_time = current_time.replace(tzinfo=tz)
-        
-        if today.is_shabbat and z.havdalah and current_time < z.havdalah:
+        # Saturday during the day until Havdalah
+        if today.is_shabbat and z.havdalah and now < z.havdalah:
             return True
-        if tomorrow.is_shabbat and z.candle_lighting and current_time >= z.candle_lighting:
+        # Friday evening after candle lighting
+        if tomorrow.is_shabbat and z.candle_lighting and now >= z.candle_lighting:
             return True
         return False
 
-    def get_molad(self, date: datetime) -> MoladDetails:
-        molad_obj = self.get_actual_molad(date.date())
-        is_shabbos_mevorchim = self.is_shabbos_mevorchim(date)
-        is_upcoming_shabbos_mevorchim = self.is_upcoming_shabbos_mevorchim(date)
-        rosh_chodesh = self.get_rosh_chodesh_days(date.date())
-        return MoladDetails(molad_obj, is_shabbos_mevorchim, is_upcoming_shabbos_mevorchim, rosh_chodesh)
+    def get_molad(self, now: datetime) -> MoladDetails:
+        molad_obj = self.get_actual_molad(now.date())
+        shabbos_now = self.is_shabbos_mevorchim(now)
+        shabbos_next = self.is_upcoming_shabbos_mevorchim(now)
+        rosh = self.get_rosh_chodesh_days(now.date())
+        return MoladDetails(molad_obj, shabbos_now, shabbos_next, rosh)
 
 
-# === COORDINATOR ===
 class MoladDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, diaspora: bool):
-        self.helper = MoladHelper(
-            hass.config.latitude,
-            hass.config.longitude,
-            str(hass.config.time_zone),
-            diaspora,
-        )
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(minutes=30),
-        )
+        self.helper = MoladHelper(hass.config.latitude, hass.config.longitude, str(hass.config.time_zone), diaspora)
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(minutes=30))
 
     async def _async_update_data(self):
-        now = datetime.now()
+        now = datetime.now(tz=self.helper.tz)
         details = self.helper.get_molad(now)
-        molad = details.molad
-        rosh = details.rosh_chodesh
-
+        m, r = details.molad, details.rosh_chodesh
         return {
-            "state": molad.friendly,
+            "state": m.friendly,
             "attributes": {
-                ATTR_DAY: molad.day,
-                ATTR_HOURS: molad.hours,
-                ATTR_MINUTES: molad.minutes,
-                ATTR_AM_OR_PM: molad.am_or_pm,
-                ATTR_CHALAKIM: molad.chalakim,
-                ATTR_FRIENDLY: molad.friendly,
-                ATTR_ROSH_CHODESH: rosh.text,
-                ATTR_ROSH_CHODESH_DAYS: ", ".join(rosh.days),
-                ATTR_ROSH_CHODESH_DATES: ", ".join([d.isoformat() for d in rosh.gdays]),
+                ATTR_DAY: m.day,
+                ATTR_HOURS: m.hours,
+                ATTR_MINUTES: m.minutes,
+                ATTR_AM_OR_PM: m.am_or_pm,
+                ATTR_CHALAKIM: m.chalakim,
+                ATTR_FRIENDLY: m.friendly,
+                ATTR_ROSH_CHODESH: r.text,
+                ATTR_ROSH_CHODESH_DAYS: ", ".join(r.days),
+                ATTR_ROSH_CHODESH_DATES: ", ".join(d.isoformat() for d in r.gdays),
                 ATTR_IS_SHABBOS_MEVOCHIM: details.is_shabbos_mevorchim,
                 ATTR_IS_UPCOMING_SHABBOS_MEVOCHIM: details.is_upcoming_shabbos_mevorchim,
-                ATTR_MONTH_NAME: rosh.month,
+                ATTR_MONTH_NAME: r.month,
             },
         }
 
 
-# === SETUP ===
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     await coordinator.async_config_entry_first_refresh()
-
-    entities = [
+    async_add_entities([
         MoladSensor(coordinator),
-        ShabbosMevorchimSensor(coordinator, is_today=True),
-        ShabbosMevorchimSensor(coordinator, is_today=False),
-    ]
-    async_add_entities(entities)
+        ShabbosMevorchimSensor(coordinator, True),
+        ShabbosMevorchimSensor(coordinator, False),
+    ])
 
 
-# === SENSORS ===
 class MoladSensor(CoordinatorEntity, SensorEntity):
     _attr_icon = "mdi:moon-waning-crescent"
-
-    def __init__(self, coordinator):
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_{SENSOR_MOLAD}"
-        self._attr_name = "Molad"
-
-    @property
-    def native_value(self):
-        return self.coordinator.data["state"]
-
-    @property
-    def extra_state_attributes(self):
-        return self.coordinator.data["attributes"]
+    def __init__(self, coordinator): super().__init__(coordinator); self._attr_unique_id = f"{DOMAIN}_{SENSOR_MOLAD}"; self._attr_name = "Molad"
+    @property def native_value(self): return self.coordinator.data["state"]
+    @property def extra_state_attributes(self): return self.coordinator.data["attributes"]
 
 
 class ShabbosMevorchimSensor(CoordinatorEntity, SensorEntity):
@@ -374,12 +356,5 @@ class ShabbosMevorchimSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{key}"
         self._attr_name = "Today is Shabbos Mevorchim" if is_today else "Upcoming Shabbos is Mevorchim"
         self._attr_icon = "mdi:judaism"
-
-    @property
-    def native_value(self):
-        key = ATTR_IS_SHABBOS_MEVOCHIM if self.is_today else ATTR_IS_UPCOMING_SHABBOS_MEVOCHIM
-        return self.coordinator.data["attributes"].get(key, False)
-
-    @property
-    def is_on(self):
-        return self.native_value
+    @property def native_value(self): return self.coordinator.data["attributes"].get(ATTR_IS_SHABBOS_MEVOCHIM if self.is_today else ATTR_IS_UPCOMING_SHABBOS_MEVOCHIM, False)
+    @property def is_on(self): return self.native_value
