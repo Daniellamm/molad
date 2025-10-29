@@ -342,19 +342,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class MoladSensor(CoordinatorEntity, SensorEntity):
+    """Molad sensor."""
+    
     _attr_icon = "mdi:moon-waning-crescent"
-    def __init__(self, coordinator): super().__init__(coordinator); self._attr_unique_id = f"{DOMAIN}_{SENSOR_MOLAD}"; self._attr_name = "Molad"
-    @property def native_value(self): return self.coordinator.data["state"]
-    @property def extra_state_attributes(self): return self.coordinator.data["attributes"]
+    
+    def __init__(self, coordinator):
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{DOMAIN}_{SENSOR_MOLAD}"
+        self._attr_name = "Molad"
+    
+    @property
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self.coordinator.data["state"]
+    
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes."""
+        return self.coordinator.data["attributes"]
 
 
 class ShabbosMevorchimSensor(CoordinatorEntity, SensorEntity):
+    """Shabbos Mevorchim sensor."""
+    
     def __init__(self, coordinator, is_today: bool):
+        """Initialize the sensor."""
         super().__init__(coordinator)
         self.is_today = is_today
         key = SENSOR_IS_SHABBOS_MEVOCHIM if is_today else SENSOR_IS_UPCOMING_SHABBOS_MEVOCHIM
         self._attr_unique_id = f"{DOMAIN}_{key}"
         self._attr_name = "Today is Shabbos Mevorchim" if is_today else "Upcoming Shabbos is Mevorchim"
         self._attr_icon = "mdi:judaism"
-    @property def native_value(self): return self.coordinator.data["attributes"].get(ATTR_IS_SHABBOS_MEVOCHIM if self.is_today else ATTR_IS_UPCOMING_SHABBOS_MEVOCHIM, False)
-    @property def is_on(self): return self.native_value
+    
+    @property
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self.coordinator.data["attributes"].get(
+            ATTR_IS_SHABBOS_MEVOCHIM if self.is_today else ATTR_IS_UPCOMING_SHABBOS_MEVOCHIM, 
+            False
+        )
+    
+    @property
+    def is_on(self):
+        """Return True if the sensor is on."""
+        return self.native_value
