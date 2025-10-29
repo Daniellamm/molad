@@ -213,7 +213,7 @@ class MoladHelper:
         date_only = date.date()
         h = HebrewDate.from_gdate(date_only)  # FIXED
         hd = h.day  # FIXED
-        z = hdate.Zmanim(date=date_only, location=self.location, hebrew=False)
+        z = hdate.Zmanim(date=date_only, location=self.location)
         if z.time > z.zmanim["sunset"]:
             hd += 1
         sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
