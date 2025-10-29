@@ -17,7 +17,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle a flow initialized by the user."""
         if user_input is not None:
             return self.async_create_entry(
-                title=user_input[CONF_NAME],
+                title=DEFAULT_NAME,
                 data={"diaspora": user_input["diaspora"]},
             )
 
@@ -25,7 +25,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
                     vol.Required("diaspora", default=DEFAULT_DIASPORA): bool,
                 }
             ),
