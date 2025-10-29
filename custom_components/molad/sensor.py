@@ -211,16 +211,19 @@ class MoladHelper:
 
     def is_shabbos_mevorchim(self, date: datetime) -> bool:
         date_only = date.date()
-        h = HebrewDate.from_gdate(date_only)  # FIXED
-        hd = h.day  # FIXED
+        h = HebrewDate.from_gdate(date_only)
+        hd = h.day
         z = hdate.Zmanim(date=date_only, location=self.location)
-        if z.time > z.zmanim["sunset"]:
+        
+        # Check if current time is after sunset
+        if z.sunset and date > z.sunset:  # FIXED
             hd += 1
+        
         sm = self.get_shabbos_mevorchim_hebrew_day_of_month(date_only)
         return (
-            self.is_actual_shabbat(z)
+            self.is_actual_shabbat(z, date)  # Pass date to method
             and hd == sm
-            and h.month != 6  # FIXED - Elul
+            and h.month != 6  # Elul
         )
 
     def is_upcoming_shabbos_mevorchim(self, date: datetime) -> bool:
@@ -229,12 +232,15 @@ class MoladHelper:
         upcoming_saturday_at_midnight = datetime.combine(upcoming_saturday, datetime.min.time())
         return self.is_shabbos_mevorchim(upcoming_saturday_at_midnight)
 
-    def is_actual_shabbat(self, z: hdate.Zmanim) -> bool:
+    def is_actual_shabbat(self, z: hdate.Zmanim, current_time: datetime) -> bool:
         today = hdate.HDateInfo(z.date)
         tomorrow = hdate.HDateInfo(z.date + timedelta(days=1))
-        if today.is_shabbat and z.havdalah and z.time < z.havdalah:
+        
+        # Check if it's Shabbat now
+        if today.is_shabbat and z.havdalah and current_time < z.havdalah:
             return True
-        if tomorrow.is_shabbat and z.candle_lighting and z.time >= z.candle_lighting:
+        # Check if Shabbat starts soon (after candle lighting)
+        if tomorrow.is_shabbat and z.candle_lighting and current_time >= z.candle_lighting:
             return True
         return False
 
