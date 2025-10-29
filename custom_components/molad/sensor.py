@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 import math
+import pytz
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -244,7 +245,11 @@ class MoladHelper:
         today = hdate.HDateInfo(z.date)
         tomorrow = hdate.HDateInfo(z.date + timedelta(days=1))
         
-        # Check if it's Shabbat now
+        # Make current_time timezone-aware if it isn't already
+        if current_time.tzinfo is None:
+            current_time = self.location.timezone.localize(current_time)
+        
+        # Check if it's Shabbat now (before havdalah)
         if today.is_shabbat and z.havdalah and current_time < z.havdalah:
             return True
         # Check if Shabbat starts soon (after candle lighting)
