@@ -16,8 +16,8 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 # Modern hdate v1.1.2 — NO htables!
-from hdate import HDate, Location
-from hdate.zmanim import Zmanim
+from hdate.hdate import HDate 
+from hdate.zmanim import Location, Zmanim
 
 from .const import (
     ATTR_DAY,
