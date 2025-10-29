@@ -1,4 +1,4 @@
-"""Support for Molad sensors - CORRECTED VERSION."""
+"""Support for Molad sensors - FINAL FIXED VERSION with month numbering conversion."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -79,7 +79,7 @@ class MoladHelper:
     # Hebrew time: Day 2 (Monday), Hour 5 (5 hours after 6pm Sunday)
     # Civil time: Sunday 11:11:20 PM
     REF_YEAR = 1
-    REF_MONTH = 7  # Tishrei
+    REF_MONTH = 7  # Tishrei (BIBLICAL numbering)
     REF_DAY_OF_WEEK = 2  # Monday (Hebrew day, where Monday starts Sunday 6pm)
     REF_HOURS = 5  # Hebrew hours (hours after 6pm)
     REF_CHALAKIM = 204
@@ -96,6 +96,26 @@ class MoladHelper:
             diaspora=diaspora,
         )
         self.tz = ZoneInfo(time_zone)
+
+    # === MONTH NUMBERING CONVERSION (NEW - FIXES THE BUG!) ===
+    @staticmethod
+    def _civil_to_biblical_month(civil_month: int, is_leap: bool = False) -> int:
+        """Convert hdate's CIVIL month numbering to BIBLICAL numbering used by _molad_raw.
+        
+        CIVIL: Tishrei=1, Cheshvan=2, Kislev=3, ..., Elul=12 (Adar I=12, Adar II=13 in leap)
+        BIBLICAL: Nisan=1, Iyar=2, Sivan=3, ..., Tishrei=7, Cheshvan=8, Kislev=9, ..., Adar=12
+        
+        This was the root cause of the 6-month offset bug!
+        """
+        if civil_month <= 6:
+            # Tishrei(1)→7, Cheshvan(2)→8, Kislev(3)→9, Tevet(4)→10, Shevat(5)→11, Adar/AdarII(6)→12
+            return civil_month + 6
+        elif civil_month == 13:
+            # Adar I in leap year → 12 (comes before Adar II which is 6→12)
+            return 12
+        else:
+            # Nisan(7)→1, Iyar(8)→2, Sivan(9)→3, Tammuz(10)→4, Av(11)→5, Elul(12)→6
+            return civil_month - 6
 
     # === LEAP YEAR (FIXED) ===
     @staticmethod
@@ -114,6 +134,9 @@ class MoladHelper:
     def _molad_raw(self, year: int, month: int) -> tuple[int, int, int, int]:
         """Calculate molad using full Metonic cycle (235 months per 19 years).
         
+        IMPORTANT: Expects month in BIBLICAL numbering (Tishrei=7, not 1).
+        Use _civil_to_biblical_month() to convert from hdate's civil numbering.
+        
         Returns tuple of (day, hours_hebrew, minutes, chalakim) where hours are in Hebrew time.
         """
         years_from_ref = year - self.REF_YEAR  # e.g., year 5785 → 5784 years
@@ -129,7 +152,7 @@ class MoladHelper:
             total_months += 13 if cycle_year in self.LEAP_YEARS_IN_CYCLE else 12
 
         # Add months in current year up to target month
-        # Hebrew year starts at Tishrei (month 7)
+        # Hebrew year starts at Tishrei (month 7 in BIBLICAL system)
         if month >= 7:
             # Tishrei to target month
             total_months += (month - 7)  # Tishrei = 0 extra
@@ -191,36 +214,52 @@ class MoladHelper:
         
         Traditional practice announces the molad for the upcoming month,
         not the current month.
+        
+        FIXED: Now converts from hdate's CIVIL month numbering to BIBLICAL numbering
+        before calling _molad_raw. This was causing the 6-month offset bug!
         """
         cur = self._hebrew_month_year(gdate)
         nxt = self._next_hebrew_month(cur)
-        raw = self._molad_raw(nxt["year"], nxt["month"])
+        
+        # CRITICAL FIX: Convert from civil to biblical month numbering!
+        # hdate returns: Tishrei=1, Cheshvan=2, Kislev=3, etc. (CIVIL)
+        # _molad_raw expects: Tishrei=7, Cheshvan=8, Kislev=9, etc. (BIBLICAL)
+        is_leap = self._is_leap_year(nxt["year"])
+        biblical_month = self._civil_to_biblical_month(nxt["month"], is_leap)
+        
+        raw = self._molad_raw(nxt["year"], biblical_month)
         return self._raw_to_molad(raw)
 
     # === HELPERS ===
     @staticmethod
     def _hebrew_month_year(gdate: datetime.date) -> dict:
+        """Get Hebrew month and year from Gregorian date.
+        Note: Returns CIVIL month numbering from hdate library."""
         h = HebrewDate.from_gdate(gdate)
         return {"year": h.year, "month": h.month}
 
     @staticmethod
     def _next_hebrew_month(cur: dict) -> dict:
+        """Get next Hebrew month (handles year rollover)."""
         if cur["month"] == 13:
             return {"month": 1, "year": cur["year"] + 1}
         return {"month": cur["month"] + 1, "year": cur["year"]}
 
     @staticmethod
     def _gdate_from_hebrew(hinfo: dict, day: int) -> datetime.date:
+        """Convert Hebrew date to Gregorian date."""
         h = HebrewDate(hinfo["year"], hinfo["month"], day)
         return h.to_gdate()
 
     @staticmethod
     def _dow_name(gdate: datetime.date) -> str:
+        """Get day of week name, using 'Shabbos' for Saturday."""
         name = gdate.strftime("%A")
         return "Shabbos" if name == "Saturday" else name
 
     # === ROSH CHODESH ===
     def get_rosh_chodesh_days(self, gdate: datetime.date) -> RoshChodesh:
+        """Get Rosh Chodesh information for the next month."""
         cur = self._hebrew_month_year(gdate)
         nxt = self._next_hebrew_month(cur)
         g_second = self._gdate_from_hebrew(nxt, 1)
@@ -228,7 +267,7 @@ class MoladHelper:
         info = hdate.HDateInfo(g_second)
         month_name = info.hdate.month.name
 
-        if nxt["month"] == 7:  # Tishrei
+        if nxt["month"] == 7:  # Tishrei (in civil numbering)
             return RoshChodesh(month_name, "", [], [])
 
         try:
@@ -240,6 +279,7 @@ class MoladHelper:
 
     # === SHABBOS MEVORCHIM (FIXED) ===
     def _shabbos_mevorchim_date(self, gdate: datetime.date) -> datetime.date:
+        """Get the date of Shabbos Mevorchim for the current month."""
         cur = self._hebrew_month_year(gdate)
         has_30_days = False
         try:
@@ -254,10 +294,12 @@ class MoladHelper:
         return last - timedelta(days=days_back)
 
     def _shabbos_mevorchim_hebrew_day(self, gdate: datetime.date) -> datetime.date:
+        """Get the Hebrew day of Shabbos Mevorchim."""
         return self._shabbos_mevorchim_date(gdate)
 
     # === SHABBOS MEVORCHIM DETECTION (FRIDAY EVENING FIXED) ===
     def is_shabbos_mevorchim(self, now: datetime) -> bool:
+        """Check if now is Shabbos Mevorchim."""
         today = now.date()
         z = hdate.Zmanim(date=today, location=self.location)
 
@@ -279,6 +321,7 @@ class MoladHelper:
         return self._is_actual_shabbat(z, now) and hd == target_hd and h.month != 6
 
     def is_upcoming_shabbos_mevorchim(self, now: datetime) -> bool:
+        """Check if the upcoming Shabbos is Shabbos Mevorchim."""
         wd = (now.date().weekday() + 1) % 7
         next_sat = now.date() - timedelta(days=wd) + timedelta(days=6)
         next_sat_dt = datetime.combine(next_sat, now.time())
@@ -302,6 +345,7 @@ class MoladHelper:
         return False
 
     def get_molad(self, now: datetime) -> MoladDetails:
+        """Get complete Molad information for display."""
         molad_obj = self.get_actual_molad(now.date())
         shabbos_now = self.is_shabbos_mevorchim(now)
         shabbos_next = self.is_upcoming_shabbos_mevorchim(now)
