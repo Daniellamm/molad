@@ -1,33 +1,24 @@
 """The Molad integration."""
-from datetime import datetime
+from __future__ import annotations
+
 import logging
-import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_TIME_ZONE, Platform
-from homeassistant.helpers import config_validation as cv
+from homeassistant.const import Platform
 
-from .const import (
-    DEFAULT_DIASPORA,
-    DOMAIN,
-    SENSOR_IS_SHABBOS_MEVOCHIM,
-    SENSOR_IS_UPCOMING_SHABBOS_MEVOCHIM,
-    SENSOR_MOLAD,
-)
-
+from .const import DOMAIN, DEFAULT_DIASPORA
 from .sensor import MoladDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_SCHEMA = vol.Schema(
-    {
-        vol.Optional("diaspora", default=DEFAULT_DIASPORA): cv.boolean,
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
 PLATFORMS = [Platform.SENSOR]
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Molad integration from YAML."""
+    return True
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Molad from a config entry."""
