@@ -18,14 +18,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        errors = {}
-
         if user_input is not None:
             return self.async_create_entry(
                 title=user_input[CONF_NAME],
-                data={
-                    "diaspora": user_input["diaspora"]
-                },
+                data={"diaspora": user_input["diaspora"]},
             )
 
         data_schema = vol.Schema(
@@ -38,5 +34,4 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=data_schema,
-            errors=errors,
         )
